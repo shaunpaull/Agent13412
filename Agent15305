@@ -45,7 +45,7 @@ AGENT_STATE_FILE = "quantum_nexus_state.json"
 GOOGLE_DRIVE_STATE_FILE = "/content/drive/MyDrive/quantum_nexus_state.json"
 SELF_MODIFY_INTERVAL = 20
 ANNEAL_GAMMA = 0.995
-MEMORY_MAX_SIZE = None
+MEMORY_MAX_SIZE = 1000
 MAX_PAGES_PER_DOMAIN = 15
 MAX_CONTENT_LENGTH = 5000000
 REQUEST_TIMEOUT = 15
@@ -10380,6 +10380,9 @@ class MetaLearningModule:
 # =============================================================================
 # SELF-EVOLUTION MODULE - ADDED HERE
 # =============================================================================
+# =============================================================================
+# SELF-EVOLUTION MODULE - ADDED HERE
+# =============================================================================
 from collections import deque
 import random
 import math
@@ -14735,6 +14738,257 @@ SAVE_INTERVAL = 5 # Save checkpoint more frequently for longer runs
 # =============================================================================
 adaptive_learning = None
 
+# =============================================================================
+# IMPROVED MAIN EXECUTION FUNCTIONS
+# =============================================================================
+
+# Global variables for tracking agent state
+adaptive_learning = None
+agent_instance = None
+
+def load_or_create_model():
+    """
+    Loads QuantumNexusModel from checkpoint file if available, or creates a new one.
+    Enhanced with better error handling and fallback mechanisms.
+
+    Returns: model object
+    """
+    model_path = GOOGLE_DRIVE_MODEL_PATH if IN_COLAB else MODEL_PATH
+    
+    # Default to HyperMorphic model if available, otherwise standard model
+    try:
+        model = HyperMorphicQuantumNexusModel()
+        log_event("Creating HyperMorphic model instance", "QUANTUM")
+    except Exception:
+        model = QuantumNexusModel()
+        log_event("Creating standard model instance", "INFO")
+    
+    start_cycle = 1  # Default start cycle for new model
+
+    try:
+        if os.path.exists(model_path):
+            log_event(f"Loading checkpoint from: {model_path}", "INFO")
+            try:
+                # Try with weights_only=False first (full checkpoint)
+                checkpoint = torch.load(model_path, map_location=device)
+
+                # Verify checkpoint is a dictionary with expected keys
+                if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['model_state_dict'])  # Load model state
+
+                    # Get cycle count with validation
+                    if 'cycle_count' in checkpoint:
+                        cycle_count = checkpoint.get('cycle_count', 1)
+                        if isinstance(cycle_count, (int, float)) and cycle_count > 0:
+                            start_cycle = int(cycle_count)
+                        else:
+                            log_event(f"Invalid cycle_count in checkpoint: {cycle_count}. Using default.", "WARNING")
+
+                    # Load agent stats if they exist and agent_instance is defined
+                    if 'agent_stats' in checkpoint and agent_instance is not None:
+                        stats = checkpoint.get('agent_stats')
+                        if isinstance(stats, dict):
+                            agent_instance.stats = defaultdict(int)
+                            # Copy values to ensure defaultdict behavior
+                            for k, v in stats.items():
+                                agent_instance.stats[k] = v
+                        else:
+                            log_event("Invalid agent_stats in checkpoint. Using empty stats.", "WARNING")
+                            agent_instance.stats = defaultdict(int)
+
+                    # Load action_log if it exists and agent_instance is defined
+                    if 'action_log' in checkpoint and agent_instance is not None:
+                        action_log = checkpoint.get('action_log', [])
+                        if isinstance(action_log, list):
+                            agent_instance.action_log = deque(action_log, maxlen=100)
+                        else:
+                            log_event("Invalid action_log in checkpoint. Using empty log.", "WARNING")
+                            agent_instance.action_log = deque(maxlen=100)
+
+                    log_event(f"Model checkpoint loaded successfully. Resuming from cycle {start_cycle}.", "INFO")
+                else:
+                    # Try direct state_dict loading if the checkpoint is just the state_dict
+                    model.load_state_dict(checkpoint)
+                    log_event("Model state dictionary loaded successfully.", "INFO")
+
+            except Exception as e:
+                # Fallback to loading only model weights if full checkpoint fails
+                log_event(f"Error loading full checkpoint: {e}. Trying weights-only load.", "WARNING")
+                try:
+                    checkpoint = torch.load(model_path, map_location=device)
+                    model.load_state_dict(checkpoint)
+                    log_event("Successfully loaded model weights only.", "INFO")
+                except Exception as e2:
+                    log_event(f"Error loading model weights: {e2}. Creating new model.", "WARNING")
+                    # Model was already created above, so we just keep it as is
+        else:
+            log_event("No checkpoint file found. Using a new model.", "INFO")
+    except Exception as e:
+        log_event(f"Error loading checkpoint from {model_path}: {e}. Using a new model.", "WARNING")
+        log_event(traceback.format_exc(), "DEBUG")  # Log detailed traceback
+
+    # Move model to appropriate device
+    model.to(device)
+
+    # Initialize _current_lr attribute if not present
+    if not hasattr(model, '_current_lr'):
+        setattr(model, '_current_lr', LEARNING_RATE)  # Use the default learning rate
+        log_event(f"Initialized model._current_lr with default learning rate: {LEARNING_RATE}", "INFO")
+
+    return model
+
+def save_checkpoint(agent, model, cycle_count):
+    """
+    Save comprehensive checkpoint with better error handling and fallbacks.
+
+    Parameters:
+    - agent: Agent instance to save state from
+    - model: Model instance to save weights from
+    - cycle_count: Current cycle count
+
+    Returns:
+    - Boolean indicating save success
+    """
+    save_path = GOOGLE_DRIVE_MODEL_PATH if IN_COLAB else LOCAL_MODEL_SAVE_PATH
+
+    try:
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
+        # Prepare checkpoint dictionary with proper type validation
+        checkpoint = {
+            'cycle_count': int(cycle_count),
+            'model_state_dict': model.state_dict(),
+            'timestamp': datetime.now().isoformat()
+        }
+
+        # Add agent stats if available
+        if hasattr(agent, 'stats'):
+            if isinstance(agent.stats, dict):
+                # Convert sets to lists for JSON serialization
+                agent_stats = convert_sets_to_lists_recursive(dict(agent.stats))
+                checkpoint['agent_stats'] = agent_stats
+            else:
+                log_event("Warning: agent.stats is not a dictionary. Skipping stats save.", "WARNING")
+
+        # Add action log if available
+        if hasattr(agent, 'action_log'):
+            if isinstance(agent.action_log, (list, deque)):
+                action_log = list(agent.action_log)
+                # Clean up action log for serialization
+                for entry in action_log:
+                    if isinstance(entry, dict):
+                        # Remove any unserializable objects
+                        for key in list(entry.keys()):
+                            if not isinstance(entry[key], (str, int, float, bool, list, dict, type(None))):
+                                entry[key] = str(entry[key])
+                checkpoint['action_log'] = action_log
+            else:
+                log_event("Warning: agent.action_log is not a list/deque. Skipping log save.", "WARNING")
+
+        # Save the checkpoint
+        torch.save(checkpoint, save_path)
+        log_event(f"Checkpoint saved to {save_path} (Cycle: {cycle_count})", "INFO")
+
+        # Also save a backup copy to a different location
+        if IN_COLAB:
+            backup_path = os.path.join(os.path.dirname(save_path), "backup_" + os.path.basename(save_path))
+            torch.save(checkpoint, backup_path)
+            log_event(f"Backup checkpoint saved to {backup_path}", "INFO")
+
+        return True
+
+    except Exception as save_error:
+        log_event(f"Primary checkpoint save error: {save_error}", "ERROR")
+        log_event(traceback.format_exc(), "ERROR")
+
+        # Try an alternate save approach with just the model state
+        try:
+            alt_path = "backup_" + LOCAL_MODEL_SAVE_PATH
+            torch.save(model.state_dict(), alt_path)
+            log_event(f"Model state saved to alternate location: {alt_path}", "INFO")
+            return True
+        except Exception as alt_save_error:
+            log_event(f"All save attempts failed! Last error: {alt_save_error}", "ERROR")
+            log_event(traceback.format_exc(), "ERROR")
+            return False
+
+def setup_colab_environment():
+    """
+    Setup the Colab environment, mounting Google Drive and installing required packages.
+    """
+    import os
+    import sys
+    import subprocess
+    import time
+    
+    print("Setting up Colab environment...")
+
+    # Install required packages
+    packages = [
+        "torch",
+        "numpy",
+        "flask",
+        "requests",
+        "beautifulsoup4"
+    ]
+    
+    for package in packages:
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package, "-q"])
+            print(f"✓ Installed {package}")
+        except subprocess.CalledProcessError:
+            print(f"✗ Failed to install {package}")
+    
+    # Handle Google Drive mounting carefully
+    try:
+        from google.colab import drive
+        
+        # Check if already mounted
+        drive_path = "/content/MyDrive"
+        if os.path.exists(drive_path) and os.path.isdir(drive_path) and os.listdir(drive_path):
+            print(f"✓ Google Drive appears to be already mounted at {drive_path}")
+        else:
+            # Try to mount, but handle the case where the directory isn't empty
+            try:
+                # Try to remove the mount point if it exists but is empty
+                if os.path.exists(drive_path) and os.path.isdir(drive_path) and not os.listdir(drive_path):
+                    os.rmdir(drive_path)
+            except:
+                pass
+                
+            # Try mounting
+            drive.mount('/content')
+            print(f"✓ Google Drive mounted at /content")
+        
+        # Create quantum_nexus directory if it doesn't exist
+        nexus_dir = "/content/MyDrive/quantum_nexus"
+        os.makedirs(nexus_dir, exist_ok=True)
+        print(f"✓ Created directory: {nexus_dir}")
+        
+        return True
+    except Exception as e:
+        print(f"✗ Google Drive issue: {str(e)}")
+        
+        # Let's provide alternative paths for a fallback
+        print("Setting up fallback local directories...")
+        try:
+            fallback_dir = "/content/local_quantum_nexus"
+            os.makedirs(fallback_dir, exist_ok=True)
+            print(f"✓ Created fallback directory: {fallback_dir}")
+            
+            # Update global paths
+            global MODEL_PATH, GOOGLE_DRIVE_MODEL_PATH, GOOGLE_DRIVE_STATE_FILE
+            MODEL_PATH = os.path.join(fallback_dir, "quantum_nexus_model_checkpoint.pth")
+            GOOGLE_DRIVE_MODEL_PATH = MODEL_PATH
+            GOOGLE_DRIVE_STATE_FILE = os.path.join(fallback_dir, "quantum_nexus_state.json")
+            print(f"✓ Updated paths to use fallback directory")
+            
+            return True
+        except Exception as e2:
+            print(f"✗ Failed to set up fallback directory: {str(e2)}")
+            return False
+
 def enhanced_main_loop():
     """
     Enhanced main execution loop with improved error handling, recovery mechanisms,
@@ -14760,26 +15014,33 @@ def enhanced_main_loop():
 
         # 2. Create optimizer
         import torch.optim as optim
-        optimizer = optim.Adam(model.parameters(), lr=getattr(model, '_current_lr', 5e-5))
+        optimizer = optim.Adam(model.parameters(), lr=getattr(model, '_current_lr', LEARNING_RATE))
         scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=ANNEAL_GAMMA)
 
         # 3. Initialize primary agent
         agent = QuantumNexusAgent(model=model)
         agent_instance = agent  # Store for dashboard access
+        agent.stats = defaultdict(int)  # Initialize stats dictionary
+        agent.action_log = deque(maxlen=100)  # Initialize action log
 
         # 4. Create core subsystems
-        # Initialize free will
-        free_will = SuperQuantumFreeWill(agent=agent)
+        # Initialize free will - use HyperMorphic version if available
+        try:
+            free_will = HyperMorphicSuperQuantumFreeWill(agent=agent)
+            log_event("Initialized HyperMorphic free will system", "QUANTUM")
+        except Exception:
+            free_will = SuperQuantumFreeWill(agent=agent)
+            log_event("Initialized standard free will system", "INFO")
+        
         agent.free_will = free_will
 
         # Initialize AI Manager, which creates other subsystems
         ai_manager = AIManager(agent, model)
         agent.ai_manager = ai_manager
 
-        # Initialize adaptive learning - ensure we use model's current_lr if available
-        current_lr = getattr(model, '_current_lr', 5e-5)
+        # Initialize adaptive learning
+        current_lr = getattr(model, '_current_lr', LEARNING_RATE)
         adaptive_learning = AdaptiveLearningSystem(model)
-        # Ensure learning rate history is initialized with current value
         if not adaptive_learning.learning_rate_history:
             adaptive_learning.learning_rate_history.append(current_lr)
         agent.adaptive_learning = adaptive_learning
@@ -14819,6 +15080,7 @@ def enhanced_main_loop():
         log_event("System validation complete. All components initialized.", "INFO")
 
         # 6. Setup async loop
+        import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -14826,10 +15088,12 @@ def enhanced_main_loop():
         cycle_count = 1
         log_event(f"🚀 Starting Quantum Nexus Enhanced Autonomous Loop 🚀", "QUANTUM")
 
+        # Save initial checkpoint
+        save_checkpoint(agent, model, cycle_count)
+
         # Main loop with enhanced error handling
         while True:
             try:
-                cycle_count += 1
                 log_event(f"===== Enhanced Autonomous Cycle {cycle_count} =====", "INFO")
 
                 # Run the agent cycle with timeout protection
@@ -14854,9 +15118,10 @@ def enhanced_main_loop():
                     system_status["consecutive_errors"] = 0
                     system_status["last_successful_cycle"] = cycle_count
                     system_status["emergency_mode"] = False
+                    cycle_count += 1
 
                     # Update strategy effectiveness if planner_sifter exists
-                    if hasattr(agent, 'planner_sifter') and hasattr(agent.action_log, '__len__') and len(agent.action_log) > 0:
+                    if hasattr(agent, 'planner_sifter') and hasattr(agent, 'action_log') and len(agent.action_log) > 0:
                         strategy_name = loop_result.get("strategy", "exploration")
                         result_data = {
                             "content_length": agent.action_log[-1].get("content_length", 0),
@@ -14877,7 +15142,7 @@ def enhanced_main_loop():
                         log_event(recovery_message + "Attempting Level 1 Recovery: Reloading model...", "WARNING")
                         try:
                             model = load_or_create_model()
-                            optimizer = optim.Adam(model.parameters(), lr=getattr(model, '_current_lr', 5e-5))
+                            optimizer = optim.Adam(model.parameters(), lr=getattr(model, '_current_lr', LEARNING_RATE))
                             scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=ANNEAL_GAMMA)
                             agent.model = model
                             ai_manager.model = model
@@ -14969,14 +15234,19 @@ def enhanced_main_loop():
         return False
 
     return True
+
 def main():
     """Main entry point with Flask dashboard and agent execution"""
     global IN_COLAB, agent_instance, FLASK_PORT
 
+    # Initialize logging
+    if not os.path.exists(os.path.dirname(LOG_FILE)) and os.path.dirname(LOG_FILE):
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+    
     log_event("=== Initializing Quantum Nexus Advanced Autonomous System ===", "INFO")
     log_event(f"Configuration: Model path: {MODEL_PATH}, Memory limit: {MEMORY_MAX_SIZE}", "INFO")
 
-    # Check for CUDA (no changes)
+    # Check for CUDA
     import torch
     if torch.cuda.is_available():
         device_name = torch.cuda.get_device_name(0)
@@ -14984,18 +15254,24 @@ def main():
     else:
         log_event("⚠️ No GPU detected - running on CPU (performance will be limited)", "WARNING")
 
-    # Check for Colab environment and mount Google Drive (no changes)
+    # Check for Colab environment and mount Google Drive
     if IN_COLAB:
         try:
             from google.colab import drive
-            drive.mount('/content/gdrive', force_remount=True) # Mount to /content/gdrive - MODIFIED MOUNT POINT
-            log_event("📂 Google Drive mounted successfully to /content/gdrive", "INFO") # Updated log message
+            if not os.path.exists('/content/gdrive'):
+                drive.mount('/content/gdrive', force_remount=True)
+            log_event("📂 Google Drive mounted successfully to /content/gdrive", "INFO")
+            
+            # Create quantum_nexus directory if it doesn't exist
+            if not os.path.exists('/content/gdrive/MyDrive/quantum_nexus'):
+                os.makedirs('/content/gdrive/MyDrive/quantum_nexus', exist_ok=True)
+                log_event("📂 Created quantum_nexus directory in Google Drive", "INFO")
         except Exception as e_mount:
             log_event(f"⚠️ Error mounting Google Drive: {e_mount}", "ERROR")
             log_event("Google Drive integration disabled for this run", "WARNING")
             IN_COLAB = False
 
-    # Find a free port for Flask Dashboard (no changes)
+    # Find a free port for Flask Dashboard
     FLASK_PORT = find_free_port()
     if FLASK_PORT is None:
         log_event("Error: No free port found for Flask dashboard. Dashboard will not start.", "ERROR")
@@ -15006,7 +15282,7 @@ def main():
         flask_thread.start()
         time.sleep(2) # Give Flask time to start
 
-    # Create special greeting (XOXO style) - No changes
+    # Create special greeting (XOXO style)
     greeting = """
     ✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨✨
 
@@ -15027,12 +15303,12 @@ def main():
     """
     log_event(greeting, "QUANTUM")
 
-    # Start autonomous agent loop (no changes)
+    # Start autonomous agent loop 
     agent_thread = Thread(target=enhanced_main_loop)
     agent_thread.daemon = True
     agent_thread.start()
 
-    # Keep main thread alive (no changes)
+    # Keep main thread alive 
     try:
         while True:
             time.sleep(1)
@@ -15044,242 +15320,21 @@ def main():
         log_event("Quantum Nexus execution complete. System shutting down.", "INFO")
 
 def run_in_colab():
-    """Colab run function - UPDATED MODEL PATH and GOOGLE_DRIVE_STATE_FILE"""
-    # Setup the environment (no changes)
-    setup_colab_environment()
-
-    # Set Colab-specific configurations - UPDATED PATHS to /content/gdrive
-    global IN_COLAB, MODEL_PATH, GOOGLE_DRIVE_MODEL_PATH, GOOGLE_DRIVE_STATE_FILE
-
+    """Colab run function with proper environment setup and fallback mechanisms"""
+    # Setup the environment 
+    setup_success = setup_colab_environment()
+    
+    # Check if there was an issue but we're using the fallback paths
+    if not setup_success:
+        print("⚠️ Using local fallback paths instead of Google Drive")
+    
+    # Set Colab-specific configurations
+    global IN_COLAB
     IN_COLAB = True
-    MODEL_PATH = "/content/gdrive/MyDrive/quantum_nexus/quantum_nexus_model_checkpoint.pth" # Checkpoint path
-    GOOGLE_DRIVE_MODEL_PATH = "/content/gdrive/MyDrive/quantum_nexus/quantum_nexus_model_checkpoint.pth" # Checkpoint path
-    GOOGLE_DRIVE_STATE_FILE = "/content/gdrive/MyDrive/quantum_nexus/quantum_nexus_state.json" # Checkpoint path for agent state
-
-    # Start the system (no changes)
+    
+    # Start the system
     main()
-def load_or_create_model():
-    """
-    Loads QuantumNexusModel from checkpoint file if available, or creates a new one.
-    Enhanced with better error handling and fallback mechanisms.
 
-    Returns: model object
-    """
-    model_path = GOOGLE_DRIVE_MODEL_PATH if IN_COLAB else MODEL_PATH
-    model = QuantumNexusModel()  # Create model instance
-    start_cycle = 1  # Default start cycle for new model
-
-    try:
-        if os.path.exists(model_path):
-            log_event(f"Loading checkpoint from: {model_path}", "INFO")
-            try:
-                # Try with weights_only=False first (full checkpoint)
-                checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-
-                # Verify checkpoint is a dictionary with expected keys
-                if not isinstance(checkpoint, dict) or 'model_state_dict' not in checkpoint:
-                    raise ValueError("Checkpoint format invalid - missing model_state_dict")
-
-                model.load_state_dict(checkpoint['model_state_dict'])  # Load model state
-
-                # Get cycle count with validation
-                if 'cycle_count' in checkpoint:
-                    cycle_count = checkpoint.get('cycle_count', 1)
-                    if isinstance(cycle_count, (int, float)) and cycle_count > 0:
-                        start_cycle = int(cycle_count)
-                    else:
-                        log_event(f"Invalid cycle_count in checkpoint: {cycle_count}. Using default.", "WARNING")
-
-                # Load agent stats if they exist and agent_instance is defined
-                if 'agent_stats' in checkpoint and 'agent_instance' in globals() and agent_instance is not None:
-                    stats = checkpoint.get('agent_stats')
-                    if isinstance(stats, dict):
-                        agent_instance.stats = defaultdict(int)
-                        # Copy values to ensure defaultdict behavior
-                        for k, v in stats.items():
-                            agent_instance.stats[k] = v
-                    else:
-                        log_event("Invalid agent_stats in checkpoint. Using empty stats.", "WARNING")
-                        agent_instance.stats = defaultdict(int)
-
-                # Load action_log if it exists and agent_instance is defined
-                if 'action_log' in checkpoint and 'agent_instance' in globals() and agent_instance is not None:
-                    action_log = checkpoint.get('action_log', [])
-                    if isinstance(action_log, list):
-                        agent_instance.action_log = deque(action_log, maxlen=100)
-                    else:
-                        log_event("Invalid action_log in checkpoint. Using empty log.", "WARNING")
-                        agent_instance.action_log = deque(maxlen=100)
-
-                log_event(f"Model checkpoint loaded successfully. Resuming from cycle {start_cycle}.", "INFO")
-
-            except Exception as e:
-                # Fallback to loading only model weights if full checkpoint fails
-                log_event(f"Error loading full checkpoint: {e}. Trying weights-only load.", "WARNING")
-                try:
-                    checkpoint = torch.load(model_path, map_location=device, weights_only=True)
-                    model.load_state_dict(checkpoint)
-                    log_event("Successfully loaded model weights only.", "INFO")
-                except Exception as e2:
-                    log_event(f"Error loading model weights: {e2}. Creating new model.", "WARNING")
-                    model = QuantumNexusModel()  # Recreate model on failure
-        else:
-            log_event("No checkpoint file found. Creating a new model.", "INFO")
-    except Exception as e:
-        log_event(f"Error loading checkpoint from {model_path}: {e}. Creating a new model.", "WARNING")
-        log_event(traceback.format_exc(), "DEBUG")  # Log detailed traceback
-        model = QuantumNexusModel()  # Ensure new model is created on failure
-
-    # Move model to appropriate device
-    model.to(device)
-
-    # Initialize _current_lr attribute if not present
-    if not hasattr(model, '_current_lr'):
-        setattr(model, '_current_lr', 5e-5)  # Use the default learning rate
-        log_event("Initialized model._current_lr with default learning rate", "INFO")
-
-    return model
-def save_checkpoint(agent, model, cycle_count):
-    """
-    Save comprehensive checkpoint with better error handling and fallbacks.
-
-    Parameters:
-    - agent: Agent instance to save state from
-    - model: Model instance to save weights from
-    - cycle_count: Current cycle count
-
-    Returns:
-    - Boolean indicating save success
-    """
-    save_path = GOOGLE_DRIVE_MODEL_PATH if IN_COLAB else LOCAL_MODEL_SAVE_PATH
-
-    try:
-        # Prepare checkpoint dictionary with proper type validation
-        checkpoint = {
-            'cycle_count': int(cycle_count),
-            'model_state_dict': model.state_dict(),
-        }
-
-        # Add agent stats if available
-        if hasattr(agent, 'stats'):
-            if isinstance(agent.stats, dict):
-                checkpoint['agent_stats'] = dict(agent.stats)  # Convert to regular dict if defaultdict
-            else:
-                log_event("Warning: agent.stats is not a dictionary. Skipping stats save.", "WARNING")
-
-        # Add action log if available
-        if hasattr(agent, 'action_log'):
-            if isinstance(agent.action_log, (list, deque)):
-                checkpoint['action_log'] = list(agent.action_log)  # Convert deque to list
-            else:
-                log_event("Warning: agent.action_log is not a list/deque. Skipping log save.", "WARNING")
-
-        # Save the checkpoint
-        torch.save(checkpoint, save_path)
-        log_event(f"Checkpoint saved to {save_path} (Cycle: {cycle_count})", "INFO")
-
-        return True
-
-    except Exception as save_error:
-        log_event(f"Primary checkpoint save error: {save_error}", "ERROR")
-
-        # Try an alternate save approach with just the model state
-        try:
-            alt_path = "backup_" + LOCAL_MODEL_SAVE_PATH
-            torch.save(model.state_dict(), alt_path)
-            log_event(f"Model state saved to alternate location: {alt_path}", "INFO")
-            return True
-        except Exception as alt_save_error:
-            log_event(f"All save attempts failed! Last error: {alt_save_error}", "ERROR")
-            return False
-def setup_colab_environment():
-    """
-    Setup the Colab environment, mounting Google Drive to /content/QuantumNexusDrive.
-    """
-    import os
-
-    # Install required packages
-    print("Installing required packages...")
-    packages = [
-        "torch",
-        "sentence-transformers",
-        "beautifulsoup4",
-        "flask",
-        "selenium",
-        "numpy"
-    ]
-    for package in packages:
-        try:
-            !pip install {package} -q
-        except Exception as e_pip_install:
-            print(f"Error installing package '{package}': {e_pip_install}")
-            return False
-
-    print("Setting up environment...")
-
-    # 1. Unmount Google Drive (if already mounted)
-    try:
-        from google.colab import drive # Import drive module here to avoid NameError
-        drive.flush_and_unmount()
-        print("Google Drive unmounted (if it was mounted).")
-    except Exception as e_unmount:
-        print(f"Warning: Error unmounting Google Drive (may not have been mounted): {e_unmount}")
-
-    # 2. Mount Google Drive to NEW mount point /content/QuantumNexusDrive - DIFFERENT MOUNT POINT
-    mount_attempts = 3
-    mount_point = '/content/QuantumNexusDrive' # <---- NEW MOUNT POINT: /content/QuantumNexusDrive
-    for attempt in range(mount_attempts):
-        try:
-            from google.colab import drive
-            drive.mount(mount_point, force_remount=True) # Mount to /content/QuantumNexusDrive
-            print(f"Google Drive mounted successfully to {mount_point} (attempt {attempt + 1}).")
-            break
-        except Exception as e_mount:
-            print(f"Error mounting Google Drive (attempt {attempt + 1}/{mount_attempts}: {e_mount}). Retrying...")
-            if attempt >= mount_attempts - 1:
-                print("Critical: Failed to mount Google Drive after multiple retries.")
-                return False
-            time.sleep(5)
-
-    # 3. Define nexus directory path under the new mount point - SIMPLIFIED DIRECTORY HANDLING
-    global GOOGLE_DRIVE_MODEL_PATH, GOOGLE_DRIVE_STATE_FILE # Declare globals here
-    nexus_dir = "/content/QuantumNexusDrive/MyDrive/quantum_nexus" # <---- NEW PATH: /content/QuantumNexusDrive
-    GOOGLE_DRIVE_MODEL_PATH = os.path.join(nexus_dir, "quantum_nexus_model_checkpoint.pth") # Checkpoint path - UPDATED
-    GOOGLE_DRIVE_STATE_FILE = os.path.join(nexus_dir, "quantum_nexus_state.json") # State file path - UPDATED
-
-    # No need to create directory here - assume user creates quantum_nexus in MyDrive manually
-    # and Colab will create /content/QuantumNexusDrive/MyDrive during mount
-
-    # Check for CUDA (no changes)
-    import torch
-    if torch.cuda.is_available():
-        device_name = torch.cuda.get_device_name(0)
-        print(f"✅ CUDA available: {device_name}")
-    else:
-        print("⚠️ CUDA not available. Running on CPU.")
-
-    # Set up Chrome for Selenium (no changes)
-    !apt-get update
-    !apt-get install -y chromium-chromedriver
-    !cp /usr/lib/chromium-browser/chromedriver /usr/bin
-
-    print("Colab environment setup complete.")
-    return True
-def run_in_colab():
-    """Colab run function - UPDATED MODEL PATH and GOOGLE_DRIVE_STATE_FILE"""
-    # Setup the environment (no changes)
-    setup_colab_environment()
-
-    # Set Colab-specific configurations - UPDATED PATHS to /content/gdrive
-    global IN_COLAB, MODEL_PATH, GOOGLE_DRIVE_MODEL_PATH, GOOGLE_DRIVE_STATE_FILE
-
-    IN_COLAB = True
-    MODEL_PATH = "/content/gdrive/MyDrive/quantum_nexus/quantum_nexus_model_checkpoint.pth" # Checkpoint path - UPDATED PATH to /content/gdrive
-    GOOGLE_DRIVE_MODEL_PATH = "/content/gdrive/MyDrive/quantum_nexus/quantum_nexus_model_checkpoint.pth" # Checkpoint path - UPDATED PATH to /content/gdrive
-    GOOGLE_DRIVE_STATE_FILE = "/content/gdrive/MyDrive/quantum_nexus/quantum_nexus_state.json" # Checkpoint path for agent state - UPDATED PATH to /content/gdrive
-
-    # Start the system (no changes)
-    main()
 if __name__ == "__main__":
     try:
         # Check for Colab environment
@@ -15295,11 +15350,3 @@ if __name__ == "__main__":
     except Exception as e:
         log_event(f"Critical startup error: {e}", "CRITICAL")
         traceback.print_exc()
-
-
-    engine = ImaginationEngine()
-    insight = engine.simulate_creation()
-    if insight:
-        log_event(f"Generated insight: {insight['text']} (Quality: {insight['quality']:.2f})", "INFO")
-    report = engine.get_imagination_report()
-    log_event(f"Imagination Report: {report}", "INFO")
