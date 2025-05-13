@@ -9449,7 +9449,7 @@ class MetaLearningModule:
         evolutionary_pressure = self._calculate_evolutionary_pressure(fitness_scores)
 
         # Determine if evolution should occur based on pressure and randomness
-        evolution_threshold = 0.3  # Base threshold
+        evolution_threshold = 0.1  # Base threshold
         evolution_probability = evolution_threshold + evolutionary_pressure
 
         if random.random() >= evolution_probability:
@@ -10390,7 +10390,7 @@ import torch
 from datetime import datetime
 
 # Constants that would be defined elsewhere
-SELF_MODIFY_INTERVAL = 100  # Number of cycles between self-modification attempts
+SELF_MODIFY_INTERVAL = 10  # Number of cycles between self-modification attempts
 MEMORY_MAX_SIZE = 1000  # Maximum memory size for free will
 
 def log_event(message, level="INFO"):
@@ -10541,7 +10541,7 @@ class HyperMorphicMetaEvolutionEngine:
         # Current capability scores with HyperMorphic zero-free initialization
         self.capability_scores = {cap: self.hyper_math.zero_free(0.3) for cap in self.capability_targets}
 
-        self.adaptation_rate = self.hyper_math.zero_free(0.15)  # Rate of adaptation pressure
+        self.adaptation_rate = self.hyper_math.zero_free(0.3)  # Rate of adaptation pressure
         self.convergence_score = self.hyper_math.zero_free(0.0)  # Score indicating evolutionary convergence
         self.performance_metrics = []  # Track performance metrics for self-modification
         self.thought_history = []  # For reflective thinking
@@ -10863,6 +10863,8 @@ class HyperMorphicMetaEvolutionEngine:
 
         return False, "No beneficial HyperMorphic self-modifications identified"
 
+
+    
     def evolve_system(self, agent):
         """
         Trigger system evolution based on HyperMorphic performance metrics,
@@ -10899,6 +10901,33 @@ class HyperMorphicMetaEvolutionEngine:
 
         # Increase generation counter with HyperMorphic increment
         self.evolution_generation += 1
+        
+        # Quick evolution path (20% chance) for faster processing
+        if random.random() < 0.2:  # 20% chance to take quick path
+            # Quick evolution without extensive analysis
+            strategy_names = list(self.strategies.keys())
+            selected_strategy = random.choice(strategy_names)
+            
+            # Apply the selected strategy directly
+            success, message, changes = self._apply_evolution_strategy(agent, selected_strategy, {})
+            
+            # Record minimal evolution history
+            evolution_record = {
+                "generation": self.evolution_generation,
+                "cycle": cycle_count,
+                "strategy": selected_strategy,
+                "success": success,
+                "message": message,
+                "changes": changes,
+                "timestamp": datetime.now().isoformat()
+            }
+            self.evolution_history.append(evolution_record)
+            
+            if success:
+                self.last_major_evolution = cycle_count
+                log_event(f"Quick HyperMorphic evolution with strategy '{selected_strategy}': {message}", "QUANTUM")
+                
+            return success, message
 
         # First try self-modification approach if we have enough performance data
         if len(self.performance_metrics) >= 10:
@@ -10926,19 +10955,17 @@ class HyperMorphicMetaEvolutionEngine:
         evolutionary_pressure = self._calculate_evolutionary_pressure(fitness_scores)
 
         # Determine if evolution should occur based on pressure and randomness
-        # All thresholds are zero-free HyperMorphic values
-        evolution_threshold = self.hyper_math.zero_free(0.3)  # Base threshold
+        # Evolution threshold lowered for faster evolution
+        evolution_threshold = self.hyper_math.zero_free(0.1)  # Reduced from 0.3
         evolution_probability = self.hyper_math.add(evolution_threshold, evolutionary_pressure)
 
         if self.hyper_math.zero_free(random.random()) >= evolution_probability:
             return False, f"Evolution check passed, but probability threshold not met ({evolution_probability:.2f})."
 
-        # System will evolve - select strategy using HyperMorphic approach
-        # Additional dimensional parameters affect selection
-        dimension_weights = self._calculate_dimension_weights(fitness_scores)
-        selected_strategy = self._select_evolution_strategy(fitness_scores, dimension_weights)
+        # System will evolve - select strategy using simplified approach
+        selected_strategy = self._select_evolution_strategy(fitness_scores)
 
-        # Apply the selected evolutionary strategy with HyperMorphic transformations
+        # Apply the selected evolutionary strategy
         success, message, changes = self._apply_evolution_strategy(agent, selected_strategy, fitness_scores)
 
         # Record the evolution attempt in HyperMorphic history
@@ -10950,13 +10977,7 @@ class HyperMorphicMetaEvolutionEngine:
             "message": message,
             "changes": changes,
             "fitness_before": fitness_scores,
-            "dimension_weights": dimension_weights,
-            "timestamp": datetime.now().isoformat(),
-            "holomorphic_preservation": self.hyper_math.zero_free(
-                success and selected_strategy in self.strategies
-                and "holomorphic_preservation" in self.strategies[selected_strategy]
-                and self.strategies[selected_strategy]["holomorphic_preservation"] or 0.5
-            )
+            "timestamp": datetime.now().isoformat()
         }
 
         self.evolution_history.append(evolution_record)
@@ -10968,9 +10989,6 @@ class HyperMorphicMetaEvolutionEngine:
             # Update strategy success rates based on outcome
             self._update_strategy_success_rates(selected_strategy, True)
 
-            # Update strategy relationships based on outcome
-            self._update_strategy_relationships(selected_strategy)
-
             log_event(f"HyperMorphic system evolution successful: Generation {self.evolution_generation}, Strategy: {selected_strategy}", "QUANTUM")
         else:
             # Update strategy success rates for failure
@@ -10979,6 +10997,37 @@ class HyperMorphicMetaEvolutionEngine:
             log_event(f"HyperMorphic system evolution attempt failed: {message}", "WARNING")
 
         return success, message
+    
+    def _quick_assess_capability_levels(self, agent):
+        """Simplified capability assessment for quick evolution"""
+        for capability in self.capability_scores.keys():
+            # Random improvement with slight upward bias
+            current = self.capability_scores[capability]
+            change = self.hyper_math.zero_free((random.random() * 0.1) - 0.03)  # Slight upward bias
+            self.capability_scores[capability] = self.hyper_math.max(
+                self.hyper_math.zero_free(0.1),
+                self.hyper_math.min(
+                    self.hyper_math.zero_free(0.95),
+                    self.hyper_math.add(current, change)
+                )
+            )
+        # Calculate simple convergence score
+        avg_score = sum(self.capability_scores.values()) / len(self.capability_scores)
+        self.convergence_score = self.hyper_math.zero_free(avg_score)
+    
+    def quick_evolve_system(self, agent):
+        """Quick system evolution with minimal overhead"""
+        self.evolution_generation += 1
+        # Select random strategy
+        strategy = random.choice(list(self.strategies.keys()))
+        # Apply with minimal analysis
+        success, message, changes = self._apply_evolution_strategy(agent, strategy, {})
+        # Record minimal evolution history
+        if success:
+            self.last_major_evolution = getattr(agent, 'ai_manager', {}).get('cycle_counter', 0)
+            log_event(f"Quick evolution successful with strategy: {strategy}", "QUANTUM")
+        return success, message
+    
 
     def _calculate_dimension_weights(self, fitness_scores):
         """
@@ -11026,6 +11075,9 @@ class HyperMorphicMetaEvolutionEngine:
             )
 
         return dimension_weights
+
+
+
 
     def _evaluate_system_fitness(self, agent):
         """
@@ -11530,6 +11582,7 @@ class HyperMorphicMetaEvolutionEngine:
             avg_gap
         )
 
+    
     def _calculate_evolutionary_pressure(self, fitness_scores):
         """
         Calculate the evolutionary pressure based on fitness scores and goal weights
@@ -11576,12 +11629,12 @@ class HyperMorphicMetaEvolutionEngine:
         # Calculate pressure: lower fitness = higher pressure with HyperMorphic subtraction
         # Add diminishing returns below 0.3 fitness
         if avg_fitness < self.hyper_math.zero_free(0.3):
-            # High pressure but capped at 0.8
-            pressure = self.hyper_math.zero_free(0.8)
+            # High pressure increased
+            pressure = self.hyper_math.zero_free(0.9)  # Increased from 0.8
         else:
-            # Linear scaling: lower fitness = higher pressure
+            # Linear scaling with higher multiplier: lower fitness = higher pressure
             pressure = self.hyper_math.mul(
-                self.hyper_math.zero_free(0.8),
+                self.hyper_math.zero_free(0.9),  # Increased from 0.8
                 self.hyper_math.sub(self.hyper_math.zero_free(1.0), avg_fitness)
             )
 
@@ -11605,10 +11658,12 @@ class HyperMorphicMetaEvolutionEngine:
 
         return pressure
 
+
+    
     def _select_evolution_strategy(self, fitness_scores, dimension_weights=None):
         """
-        Select an appropriate evolution strategy using HyperMorphic n-dimensional
-        quantum-inspired selection algorithm that considers fitness across dimensions.
+        Select an appropriate evolution strategy using simplified logic
+        for faster decision making.
 
         Parameters:
         - fitness_scores: Current fitness evaluation
@@ -11617,133 +11672,102 @@ class HyperMorphicMetaEvolutionEngine:
         Returns:
         - Selected strategy name
         """
-        if not dimension_weights:
-            dimension_weights = [self.hyper_math.zero_free(1.0/self.evolutionary_dimensions)
-                               for _ in range(self.evolutionary_dimensions)]
-
-        # First, identify capability gaps to guide strategy selection
-        capability_gaps = {}
-        for capability, target in self.capability_targets.items():
-            current = self.capability_scores.get(capability, self.hyper_math.zero_free(0.3))
-            gap = self.hyper_math.sub(target, current)
-
-            # Only consider significant gaps
-            if gap > self.hyper_math.zero_free(0.1):
-                capability_gaps[capability] = gap
-
-        # Strategy scores in multidimensional space
-        strategy_scores = {}
-
-        for strategy_name, strategy_data in self.strategies.items():
-            # Base score on strategy success rate
-            success_rate = strategy_data.get("success_rate", self.hyper_math.zero_free(0.5))
-
-            # Calculate dimensional score using strategy vectors and dimension weights
-            dimensional_score = self.hyper_math.zero_free(0.0)
-
-            if "dimensional_vectors" in strategy_data:
-                strategy_vector = strategy_data["dimensional_vectors"]
-
-                # Calculate weighted dimensional alignment
-                for dim_idx, (vector_value, weight) in enumerate(zip(strategy_vector, dimension_weights)):
-                    weighted_value = self.hyper_math.mul(vector_value, weight)
-                    dimensional_score = self.hyper_math.add(dimensional_score, weighted_value)
-
-            # Calculate capability alignment score
-            capability_alignment = self.hyper_math.zero_free(0.0)
-
-            if capability_gaps:
-                # Find strategy to capability mapping
-                capability_map = {
-                    "expansion": "knowledge_representation",
-                    "pruning": "efficiency",
-                    "restructuring": "adaptability",
-                    "specialization": "learning",
-                    "integration": "planning",
-                    "quantum_variation": "quantum_superposition",
-                    "holomorphic_restructuring": "holomorphic_processing"
-                }
-
-                if strategy_name in capability_map:
-                    target_capability = capability_map[strategy_name]
-                    if target_capability in capability_gaps:
-                        capability_alignment = self.hyper_math.mul(
-                            capability_gaps[target_capability],
-                            self.hyper_math.zero_free(0.8)  # Weight for capability alignment
-                        )
-
-            # Check for recent use (avoid using the same strategy repeatedly)
-            last_attempt = strategy_data.get("last_attempt", 0)
-            recency_penalty = self.hyper_math.zero_free(0.0)
-
-            if last_attempt > 0:
-                cycles_since_use = self.hyper_math.sub(
-                    self.hyper_math.zero_free(self.evolution_generation),
-                    self.hyper_math.zero_free(last_attempt)
-                )
-
-                if cycles_since_use < self.hyper_math.zero_free(3):  # Recent use
-                    recency_penalty = self.hyper_math.zero_free(0.2)  # Significant penalty
-                elif cycles_since_use < self.hyper_math.zero_free(6):  # Somewhat recent
-                    recency_penalty = self.hyper_math.zero_free(0.1)  # Moderate penalty
-
-            # Calculate final score with HyperMorphic operations
-            strategy_scores[strategy_name] = self.hyper_math.add(
-                self.hyper_math.add(
-                    self.hyper_math.mul(success_rate, self.hyper_math.zero_free(0.3)),  # 30% success rate
-                    self.hyper_math.mul(dimensional_score, self.hyper_math.zero_free(0.4))  # 40% dimensional alignment
-                ),
-                self.hyper_math.add(
-                    self.hyper_math.mul(capability_alignment, self.hyper_math.zero_free(0.3)),  # 30% capability alignment
-                    self.hyper_math.mul(self.hyper_math.zero_free(random.random()), self.hyper_math.zero_free(0.2))  # 20% quantum randomness
-                )
-            )
-
-            # Apply recency penalty
-            strategy_scores[strategy_name] = self.hyper_math.sub(
-                strategy_scores[strategy_name],
-                recency_penalty
-            )
-
-        # Sometimes try a blended strategy (15% chance with HyperMorphic probability)
-        if (self.hyper_math.zero_free(random.random()) < self.hyper_math.zero_free(0.15) and
-            len(self.strategies) >= 2):
-
-            # Use quantum entanglement to select strategies to blend
-            strategy_pairs = []
-
-            # Calculate entanglement-weighted pairs
-            for strategy1, rels in self.strategy_relationships.items():
-                for strategy2, rel_data in rels.items():
-                    strength = rel_data.get("strength", self.hyper_math.zero_free(0.1))
-                    strategy_pairs.append((strategy1, strategy2, strength))
-
-            # Sort by entanglement strength
-            strategy_pairs.sort(key=lambda x: x[2], reverse=True)
-
-            # Choose from top pairs with probability proportional to strength
-            if strategy_pairs:
-                top_pairs = strategy_pairs[:5]  # Consider top 5 pairs
-                pair_strengths = [p[2] for p in top_pairs]
-
-                # Ensure zero-free strengths
-                pair_strengths = [max(self.hyper_math.epsilon, s) for s in pair_strengths]
-
-                # Select pair with probability proportional to strength
-                selected_idx = random.choices(range(len(top_pairs)), weights=pair_strengths, k=1)[0]
-                strategy1, strategy2, _ = top_pairs[selected_idx]
-
-                # Try to create blended strategy
-                blended_name, _ = self.blend_strategies(strategy1, strategy2)
-                if blended_name:
-                    return blended_name
-
-        # If no blended strategy created, select highest scoring strategy
-        if strategy_scores:
-            return max(strategy_scores.items(), key=lambda x: x[1])[0]
-        else:
-            # Default to expansion if no scores (shouldn't happen with zero-free operations)
+        # Quick path: 30% chance to use a fast selection path
+        if random.random() < 0.3:
+            # Quick random selection from top strategies
+            top_strategies = sorted(self.strategies.items(), 
+                                   key=lambda x: x[1].get("success_rate", 0.5), 
+                                   reverse=True)[:3]
+            if top_strategies:
+                return random.choice(top_strategies)[0]
+        
+        if not fitness_scores:
+            # Default to expansion if no scores
             return "expansion"
+
+        # Calculate weighted probability for each strategy
+        strategy_weights = {}
+
+        # Strategy 1: Expansion - good when performance is low but efficiency is high
+        perf = self.hyper_math.zero_free(fitness_scores.get("performance", 0.5))
+        eff = self.hyper_math.zero_free(fitness_scores.get("efficiency", 0.5))
+        
+        if perf < self.hyper_math.zero_free(0.6) and eff > self.hyper_math.zero_free(0.7):
+            strategy_weights["expansion"] = self.hyper_math.mul(
+                self.hyper_math.zero_free(0.7),
+                self.strategies["expansion"]["success_rate"]
+            )
+        else:
+            strategy_weights["expansion"] = self.hyper_math.mul(
+                self.hyper_math.zero_free(0.3),
+                self.strategies["expansion"]["success_rate"]
+            )
+
+        # Strategy 2: Pruning - good when efficiency is low but performance is decent
+        if eff < self.hyper_math.zero_free(0.5) and perf > self.hyper_math.zero_free(0.6):
+            strategy_weights["pruning"] = self.hyper_math.mul(
+                self.hyper_math.zero_free(0.8),
+                self.strategies["pruning"]["success_rate"]
+            )
+        else:
+            strategy_weights["pruning"] = self.hyper_math.mul(
+                self.hyper_math.zero_free(0.3),
+                self.strategies["pruning"]["success_rate"]
+            )
+
+        # Strategy 3: Restructuring - good when adaptability is low
+        adapt = self.hyper_math.zero_free(fitness_scores.get("adaptability", 0.5))
+        if adapt < self.hyper_math.zero_free(0.5):
+            strategy_weights["restructuring"] = self.hyper_math.mul(
+                self.hyper_math.zero_free(0.7),
+                self.strategies["restructuring"]["success_rate"]
+            )
+        else:
+            strategy_weights["restructuring"] = self.hyper_math.mul(
+                self.hyper_math.zero_free(0.4),
+                self.strategies["restructuring"]["success_rate"]
+            )
+
+        # Strategy 4: Specialization - good for complex systems with good performance
+        complex = self.hyper_math.zero_free(fitness_scores.get("complexity", 0.5))
+        if complex > self.hyper_math.zero_free(0.7) and perf > self.hyper_math.zero_free(0.7):
+            strategy_weights["specialization"] = self.hyper_math.mul(
+                self.hyper_math.zero_free(0.8),
+                self.strategies["specialization"]["success_rate"]
+            )
+        else:
+            strategy_weights["specialization"] = self.hyper_math.mul(
+                self.hyper_math.zero_free(0.2),
+                self.strategies["specialization"]["success_rate"]
+            )
+
+        # Strategy 5: Integration - good for improving robustness
+        robust = self.hyper_math.zero_free(fitness_scores.get("robustness", 0.5))
+        if robust < self.hyper_math.zero_free(0.6):
+            strategy_weights["integration"] = self.hyper_math.mul(
+                self.hyper_math.zero_free(0.7),
+                self.strategies["integration"]["success_rate"]
+            )
+        else:
+            strategy_weights["integration"] = self.hyper_math.mul(
+                self.hyper_math.zero_free(0.3),
+                self.strategies["integration"]["success_rate"]
+            )
+
+        # Add randomness factor to promote exploration
+        for strategy in strategy_weights:
+            random_boost = self.hyper_math.zero_free(random.uniform(0, 0.3))
+            strategy_weights[strategy] = self.hyper_math.add(
+                strategy_weights[strategy],
+                random_boost
+            )
+
+        # Select strategy with highest weight
+        if strategy_weights:
+            selected_strategy = max(strategy_weights.items(), key=lambda x: x[1])[0]
+            return selected_strategy
+        else:
+            return "expansion"  # Default fallback
 
     def _apply_evolution_strategy(self, agent, strategy, fitness_scores):
         """
